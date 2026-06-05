@@ -1,12 +1,12 @@
 """
-Chapter 7: Building a Scientific RAG System with PostgreSQL and pgvector
+7장: PostgreSQL과 pgvector로 과학 논문 RAG 시스템 구축
 =========================================================================
-A RAG system for scientific papers using pgvector for vector search
-and Ollama for local LLM inference. Builds on Chapter 5's schema.
+벡터 검색에는 pgvector를, 로컬 LLM 추론에는 Ollama를 사용하는
+과학 논문용 RAG 시스템. 5장의 스키마를 기반으로 구축.
 
-Dependencies: pip install psycopg2-binary sentence-transformers requests
+의존성: pip install psycopg2-binary sentence-transformers requests
               numpy PyMuPDF python-dotenv
-Also requires: PostgreSQL with pgvector extension, Ollama running locally
+추가 요구 사항: pgvector 확장이 포함된 PostgreSQL, 로컬에서 실행 중인 Ollama
 """
 
 import os
@@ -29,7 +29,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Configuration
+# 구성
 # =============================================================================
 
 DB_CONFIG = {
@@ -45,15 +45,15 @@ DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
 
 
 # =============================================================================
-# 7.2 - Schema Setup (extends Chapter 5)
+# 7.2 - 스키마 설정(5장 확장)
 # =============================================================================
 
 SCHEMA_SQL = """
--- Ensure pgvector is available
+-- pgvector 사용 가능 여부 확인
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
--- Papers table (same as Ch5, included for standalone use)
+-- 논문 테이블(5장과 동일, 독립 실행용으로 포함)
 CREATE TABLE IF NOT EXISTS papers (
     id SERIAL PRIMARY KEY,
     arxiv_id VARCHAR(50) UNIQUE NOT NULL,
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS papers (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Paper chunks with embeddings
+-- 임베딩을 포함한 논문 청크
 CREATE TABLE IF NOT EXISTS paper_chunks (
     id SERIAL PRIMARY KEY,
     paper_id INTEGER REFERENCES papers(id) ON DELETE CASCADE,
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS paper_chunks (
     UNIQUE (paper_id, chunk_index)
 );
 
--- HNSW index for fast vector search
+-- 빠른 벡터 검색을 위한 HNSW 인덱스
 CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON paper_chunks
 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_paper_id ON paper_chunks (paper_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_text_trgm ON paper_chunks
 USING GIN (chunk_text gin_trgm_ops);
 
--- RAG-specific: conversation/query history
+-- RAG 전용: 대화/쿼리 이력
 CREATE TABLE IF NOT EXISTS rag_conversations (
     id SERIAL PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL,
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS rag_conversations (
 
 CREATE INDEX IF NOT EXISTS idx_rag_session ON rag_conversations (session_id, created_at);
 
--- Search analytics
+-- 검색 분석
 CREATE TABLE IF NOT EXISTS search_analytics (
     id SERIAL PRIMARY KEY,
     query_text TEXT NOT NULL,
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS search_analytics (
 
 
 def setup_database():
-    """Initialize the database schema."""
+    """데이터베이스 스키마 초기화."""
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
     with conn.cursor() as cur:
@@ -134,11 +134,11 @@ def setup_database():
 
 
 # =============================================================================
-# 7.3 - Embedding Generator
+# 7.3 - 임베딩 생성기
 # =============================================================================
 
 class EmbeddingGenerator:
-    """Singleton embedding generator for consistent embeddings."""
+    """일관된 임베딩을 위한 싱글턴 임베딩 생성기."""
 
     _instance = None
 
@@ -166,33 +166,33 @@ class EmbeddingGenerator:
         )
 
     def encode_query(self, query: str) -> np.ndarray:
-        """Encode a search query, returning a single vector."""
+        """검색 쿼리를 인코딩하고 단일 벡터 반환."""
         return self.encode(query)[0]
 
 
 # =============================================================================
-# 7.4 - Text Chunking for Scientific Papers
+# 7.4 - 과학 논문용 텍스트 청킹
 # =============================================================================
 
 class ScientificTextChunker:
-    """Chunk scientific text preserving section boundaries and context."""
+    """섹션 경계와 문맥을 보존하는 과학 텍스트 청킹."""
 
     SECTION_PATTERNS = [
-        r'^(?:#{1,3})\s+(.+)',                          # Markdown headers
-        r'^(\d+\.?\s+[A-Z][A-Za-z\s]+)',                 # Numbered sections
+        r'^(?:#{1,3})\s+(.+)',                          # Markdown 헤더
+        r'^(\d+\.?\s+[A-Z][A-Za-z\s]+)',                 # 번호가 매겨진 섹션
         r'^(Abstract|Introduction|Methods?|Results?|'
-        r'Discussion|Conclusion|References|Appendix)',    # Named sections
+        r'Discussion|Conclusion|References|Appendix)',    # 이름이 지정된 섹션
     ]
 
     def __init__(self, target_size: int = 512, min_size: int = 128,
-                 max_size: int = 1024, overlap: int = 64):
+                max_size: int = 1024, overlap: int = 64):
         self.target_size = target_size
         self.min_size = min_size
         self.max_size = max_size
         self.overlap = overlap
 
     def chunk_text(self, text: str) -> List[Dict]:
-        """Chunk text into overlapping segments with metadata."""
+        """텍스트를 메타데이터가 포함된 겹침 세그먼트로 청킹."""
         sections = self._split_into_sections(text)
         all_chunks = []
 
@@ -200,14 +200,14 @@ class ScientificTextChunker:
             chunks = self._chunk_section(section_text, section_name)
             all_chunks.extend(chunks)
 
-        # Assign sequential indices
+        # 순차 인덱스 할당
         for i, chunk in enumerate(all_chunks):
             chunk['chunk_index'] = i
 
         return all_chunks
 
     def _split_into_sections(self, text: str) -> List[Tuple[str, str]]:
-        """Split text into named sections."""
+        """텍스트를 이름이 지정된 섹션으로 분할."""
         lines = text.split('\n')
         sections = []
         current_section = "Introduction"
@@ -233,7 +233,7 @@ class ScientificTextChunker:
         return sections if sections else [("Full Text", text)]
 
     def _chunk_section(self, text: str, section_name: str) -> List[Dict]:
-        """Chunk a single section with overlap."""
+        """단일 섹션을 겹침을 포함해 청킹."""
         words = text.split()
         if len(words) <= self.max_size:
             if len(words) >= self.min_size:
@@ -271,39 +271,44 @@ class ScientificTextChunker:
     @staticmethod
     def _has_math(text: str) -> bool:
         math_indicators = [r'\$.*\$', r'\\frac', r'\\sum', r'\\int',
-                           r'\\alpha', r'\\beta', r'=\s*\d']
+                        r'\\alpha', r'\\beta', r'=\s*\d']
         return any(re.search(p, text) for p in math_indicators)
 
     @staticmethod
     def _has_code(text: str) -> bool:
         code_indicators = ['```', 'def ', 'import ', 'class ', 'print(',
-                           'return ', 'if __name__']
+                        'return ', 'if __name__']
         return any(ind in text for ind in code_indicators)
 
 
 # =============================================================================
-# 7.5 - Paper Ingestion Pipeline
+# 7.5 - 논문 수집 파이프라인
 # =============================================================================
 
 class PaperIngestionPipeline:
-    """Ingest papers: extract text, chunk, embed, store."""
+    """논문 수집: 텍스트 추출, 청킹, 임베딩, 저장."""
 
     def __init__(self, db_config: dict):
         self.db_config = db_config
         self.embedder = EmbeddingGenerator()
-        self.chunker = ScientificTextChunker()
+        self.chunker = ScientificTextChunker(
+            target_size=128,
+            min_size=5,
+            max_size=256,
+            overlap=20
+        )
 
     def ingest_paper_text(self, arxiv_id: str, title: str, abstract: str,
-                          full_text: str, authors: List[str] = None,
-                          categories: List[str] = None,
-                          published_date: str = None) -> Dict:
-        """Ingest a paper from its text content."""
+                        full_text: str, authors: List[str] = None,
+                        categories: List[str] = None,
+                        published_date: str = None) -> Dict:
+        """텍스트 콘텐츠로부터 논문 수집."""
         conn = psycopg2.connect(**self.db_config)
         conn.autocommit = False
 
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Upsert paper record
+                # 논문 레코드 업서트
                 cur.execute("""
                     INSERT INTO papers (arxiv_id, title, abstract, authors,
                                         categories, primary_category, published_date)
@@ -312,39 +317,39 @@ class PaperIngestionPipeline:
                         title = EXCLUDED.title, abstract = EXCLUDED.abstract
                     RETURNING id
                 """, (arxiv_id, title, abstract,
-                      authors or [], categories or [],
-                      categories[0] if categories else None,
-                      published_date))
+                    authors or [], categories or [],
+                    categories[0] if categories else None,
+                    published_date))
                 paper_id = cur.fetchone()['id']
 
-                # Chunk the text (abstract + full text)
+                # 텍스트 청킹(초록 + 전체 텍스트)
                 combined = f"Abstract\n{abstract}\n\n{full_text}"
                 chunks = self.chunker.chunk_text(combined)
 
                 if not chunks:
-                    conn.rollback()
+                    conn.commit()
                     return {'paper_id': paper_id, 'chunks': 0, 'status': 'no_chunks'}
 
-                # Generate embeddings
+                # 임베딩 생성
                 texts = [c['text'] for c in chunks]
                 embeddings = self.embedder.encode(texts, show_progress=True)
 
-                # Delete existing chunks for this paper
+                # 이 논문의 기존 청크 삭제
                 cur.execute("DELETE FROM paper_chunks WHERE paper_id = %s", (paper_id,))
 
-                # Insert chunks with embeddings
+                # 임베딩이 포함된 청크 삽입
                 for chunk, embedding in zip(chunks, embeddings):
                     cur.execute("""
                         INSERT INTO paper_chunks
                         (paper_id, chunk_index, chunk_text, chunk_tokens,
-                         embedding, section_name, has_math, has_code)
+                        embedding, section_name, has_math, has_code)
                         VALUES (%s, %s, %s, %s, %s::vector, %s, %s, %s)
                     """, (paper_id, chunk['chunk_index'], chunk['text'],
-                          chunk['token_count'],
-                          f"[{','.join(map(str, embedding.tolist()))}]",
-                          chunk['section'], chunk['has_math'], chunk['has_code']))
+                        chunk['token_count'],
+                        f"[{','.join(map(str, embedding.tolist()))}]",
+                        chunk['section'], chunk['has_math'], chunk['has_code']))
 
-                # Mark as processed
+                # 처리 완료로 표시
                 cur.execute("""
                     UPDATE papers SET embedding_generated = TRUE WHERE id = %s
                 """, (paper_id,))
@@ -365,12 +370,12 @@ class PaperIngestionPipeline:
 
 
 # =============================================================================
-# 7.6 - Semantic Search Engine
+# 7.6 - 의미 검색 엔진
 # =============================================================================
 
 @dataclass
 class SearchResult:
-    """A single search result with paper metadata and matched chunks."""
+    """논문 메타데이터와 일치한 청크가 포함된 단일 검색 결과."""
     paper_id: int
     arxiv_id: str
     title: str
@@ -383,7 +388,7 @@ class SearchResult:
 
 
 class ScientificSearchEngine:
-    """Semantic + hybrid search over scientific papers."""
+    """과학 논문 대상 의미 검색 + 하이브리드 검색."""
 
     def __init__(self, db_config: dict):
         self.db_config = db_config
@@ -392,7 +397,7 @@ class ScientificSearchEngine:
     def semantic_search(self, query: str, limit: int = 10,
                         categories: Optional[List[str]] = None,
                         min_year: Optional[int] = None) -> List[SearchResult]:
-        """Pure vector similarity search."""
+        """순수 벡터 유사도 검색."""
         query_embedding = self.embedder.encode_query(query)
         embedding_str = f"[{','.join(map(str, query_embedding.tolist()))}]"
 
@@ -427,7 +432,7 @@ class ScientificSearchEngine:
                 params.append(min_year)
 
             sql += " ORDER BY pc.embedding <=> %s::vector ASC LIMIT %s"
-            params.extend([embedding_str, limit * 3])  # Over-fetch for grouping
+            params.extend([embedding_str, limit * 3])  # 그룹화를 위한 초과 가져오기
 
             cur.execute(sql, params)
             rows = cur.fetchall()
@@ -436,9 +441,9 @@ class ScientificSearchEngine:
         return self._group_by_paper(rows, limit)
 
     def hybrid_search(self, query: str, limit: int = 10,
-                      semantic_weight: float = 0.7,
-                      categories: Optional[List[str]] = None) -> List[SearchResult]:
-        """Hybrid search combining vector similarity and keyword matching."""
+                    semantic_weight: float = 0.7,
+                    categories: Optional[List[str]] = None) -> List[SearchResult]:
+        """벡터 유사도와 키워드 매칭을 결합한 하이브리드 검색."""
         query_embedding = self.embedder.encode_query(query)
         embedding_str = f"[{','.join(map(str, query_embedding.tolist()))}]"
 
@@ -447,10 +452,10 @@ class ScientificSearchEngine:
             sql = """
                 WITH semantic AS (
                     SELECT pc.id as chunk_id,
-                           pc.paper_id,
-                           pc.chunk_text,
-                           pc.section_name,
-                           1 - (pc.embedding <=> %(emb)s::vector) as sem_score
+                        pc.paper_id,
+                        pc.chunk_text,
+                        pc.section_name,
+                        1 - (pc.embedding <=> %(emb)s::vector) as sem_score
                     FROM paper_chunks pc
                     JOIN papers p ON pc.paper_id = p.id
                     WHERE 1=1
@@ -460,17 +465,17 @@ class ScientificSearchEngine:
                 ),
                 keyword AS (
                     SELECT pc.id as chunk_id,
-                           pc.paper_id,
-                           pc.chunk_text,
-                           pc.section_name,
-                           ts_rank_cd(
-                               to_tsvector('english', pc.chunk_text),
-                               plainto_tsquery('english', %(query)s)
-                           ) as kw_score
+                        pc.paper_id,
+                        pc.chunk_text,
+                        pc.section_name,
+                        ts_rank_cd(
+                            to_tsvector('english', pc.chunk_text),
+                            plainto_tsquery('english', %(query)s)
+                        ) as kw_score
                     FROM paper_chunks pc
                     JOIN papers p ON pc.paper_id = p.id
                     WHERE to_tsvector('english', pc.chunk_text) @@
-                          plainto_tsquery('english', %(query)s)
+                        plainto_tsquery('english', %(query)s)
                     {category_filter}
                     LIMIT %(fetch_limit)s
                 )
@@ -508,7 +513,7 @@ class ScientificSearchEngine:
             cur.execute(sql, params)
             chunk_rows = cur.fetchall()
 
-            # Fetch paper metadata for matched papers
+            # 일치한 논문의 논문 메타데이터 가져오기
             paper_ids = list(set(r['paper_id'] for r in chunk_rows if r['paper_id']))
             if not paper_ids:
                 conn.close()
@@ -516,14 +521,14 @@ class ScientificSearchEngine:
 
             cur.execute("""
                 SELECT id, arxiv_id, title, abstract, authors,
-                       categories, published_date
+                    categories, published_date
                 FROM papers WHERE id = ANY(%s)
             """, (paper_ids,))
             papers_map = {r['id']: r for r in cur.fetchall()}
 
         conn.close()
 
-        # Group chunks by paper
+        # 논문별 청크 그룹화
         results_map = {}
         for row in chunk_rows:
             pid = row['paper_id']
@@ -554,7 +559,7 @@ class ScientificSearchEngine:
         return sorted_results[:limit]
 
     def _group_by_paper(self, rows: List[Dict], limit: int) -> List[SearchResult]:
-        """Group chunk-level results into paper-level results."""
+        """청크 수준 결과를 논문 수준 결과로 그룹화."""
         results_map = {}
         for row in rows:
             pid = row['paper_id']
@@ -584,20 +589,20 @@ class ScientificSearchEngine:
 
 
 # =============================================================================
-# 7.7 - Ollama Integration
+# 7.7 - Ollama 통합
 # =============================================================================
 
 class OllamaClient:
-    """Client for local Ollama LLM inference."""
+    """로컬 Ollama LLM 추론용 클라이언트."""
 
     def __init__(self, base_url: str = OLLAMA_BASE_URL,
-                 default_model: str = DEFAULT_MODEL):
+                default_model: str = DEFAULT_MODEL):
         self.base_url = base_url
         self.default_model = default_model
 
     def generate(self, prompt: str, model: str = None,
-                 temperature: float = 0.1, max_tokens: int = 2048) -> str:
-        """Generate a response from Ollama."""
+                temperature: float = 0.1, max_tokens: int = 2048) -> str:
+        """Ollama에서 응답 생성."""
         url = f"{self.base_url}/api/generate"
         payload = {
             "model": model or self.default_model,
@@ -620,7 +625,7 @@ class OllamaClient:
             return f"Error: {str(e)}"
 
     def list_models(self) -> List[str]:
-        """List available Ollama models."""
+        """사용 가능한 Ollama 모델 목록 조회."""
         try:
             r = requests.get(f"{self.base_url}/api/tags", timeout=5)
             return [m['name'] for m in r.json().get('models', [])]
@@ -636,11 +641,11 @@ class OllamaClient:
 
 
 # =============================================================================
-# 7.8 - RAG Pipeline
+# 7.8 - RAG 파이프라인
 # =============================================================================
 
 class ScientificRAG:
-    """Complete RAG pipeline for scientific paper Q&A."""
+    """과학 논문 질의응답을 위한 완전한 RAG 파이프라인."""
 
     def __init__(self, db_config: dict, ollama_model: str = DEFAULT_MODEL):
         self.search_engine = ScientificSearchEngine(db_config)
@@ -648,11 +653,11 @@ class ScientificRAG:
         self.db_config = db_config
 
     def answer(self, question: str, num_chunks: int = 5,
-               search_mode: str = 'hybrid',
-               categories: Optional[List[str]] = None) -> Dict:
-        """Full RAG: retrieve relevant chunks, generate answer."""
+            search_mode: str = 'hybrid',
+            categories: Optional[List[str]] = None) -> Dict:
+        """전체 RAG: 관련 청크 검색, 답변 생성."""
 
-        # 1. Retrieve
+        # 1. 검색
         t0 = time.time()
         if search_mode == 'hybrid':
             results = self.search_engine.hybrid_search(
@@ -672,16 +677,16 @@ class ScientificRAG:
                 'generation_ms': 0
             }
 
-        # 2. Build context
+        # 2. 문맥 구성
         context = self._build_context(results)
 
-        # 3. Generate
+        # 3. 생성
         prompt = self._build_prompt(question, context)
         t1 = time.time()
         answer = self.ollama.generate(prompt)
         generation_ms = (time.time() - t1) * 1000
 
-        # 4. Log analytics
+        # 4. 분석 로그 기록
         self._log_analytics(question, len(results), retrieval_ms, generation_ms)
 
         sources = [{
@@ -700,7 +705,7 @@ class ScientificRAG:
         }
 
     def _build_context(self, results: List[SearchResult]) -> str:
-        """Format search results as context for the LLM."""
+        """LLM용 문맥으로 검색 결과 형식화."""
         sections = []
         for i, result in enumerate(results, 1):
             chunks_text = "\n".join(
@@ -739,8 +744,8 @@ QUESTION: {question}
 ANSWER:"""
 
     def _log_analytics(self, query: str, num_results: int,
-                       retrieval_ms: float, generation_ms: float):
-        """Log search analytics to database."""
+                    retrieval_ms: float, generation_ms: float):
+        """검색 분석 정보를 데이터베이스에 기록."""
         try:
             conn = psycopg2.connect(**self.db_config)
             with conn.cursor() as cur:
@@ -749,11 +754,11 @@ ANSWER:"""
                 cur.execute("""
                     INSERT INTO search_analytics
                     (query_text, query_embedding, num_results,
-                     retrieval_time_ms, generation_time_ms, model_used)
+                    retrieval_time_ms, generation_time_ms, model_used)
                     VALUES (%s, %s::vector, %s, %s, %s, %s)
                 """, (query, embedding_str, num_results,
-                      int(retrieval_ms), int(generation_ms),
-                      self.ollama.default_model))
+                    int(retrieval_ms), int(generation_ms),
+                    self.ollama.default_model))
             conn.commit()
             conn.close()
         except Exception as e:
@@ -761,11 +766,11 @@ ANSWER:"""
 
 
 # =============================================================================
-# 7.9 - Sample Data Loader
+# 7.9 - 샘플 데이터 로더
 # =============================================================================
 
 def load_sample_papers(db_config: dict):
-    """Load sample papers for testing."""
+    """테스트용 샘플 논문 로드."""
     pipeline = PaperIngestionPipeline(db_config)
 
     sample_papers = [
@@ -844,11 +849,11 @@ Anomaly detection identifies outliers in embedding space.""",
 
 
 # =============================================================================
-# 7.10 - Main
+# 7.10 - 메인
 # =============================================================================
 
 def main():
-    """Main entry point."""
+    """주 진입점."""
     import sys
 
     if len(sys.argv) > 1:
@@ -862,7 +867,7 @@ def main():
 
     print("=== Scientific RAG System ===\n")
 
-    # Check Ollama
+    # Ollama 확인
     ollama = OllamaClient()
     if not ollama.is_available():
         print("Ollama not running. Start with: ollama serve")
@@ -872,10 +877,10 @@ def main():
     models = ollama.list_models()
     print(f"Available Ollama models: {models}")
 
-    # Initialize RAG
+    # RAG 초기화
     rag = ScientificRAG(DB_CONFIG)
 
-    # Demo questions
+    # 데모 질문
     demo_questions = [
         "How does self-attention work in transformers?",
         "What indexing methods are used in vector databases?",
@@ -890,9 +895,9 @@ def main():
         print(f"A: {result['answer'][:500]}...")
         print(f"\nSources: {[s['arxiv_id'] for s in result['sources']]}")
         print(f"Retrieval: {result['retrieval_ms']:.0f}ms | "
-              f"Generation: {result['generation_ms']:.0f}ms")
+            f"Generation: {result['generation_ms']:.0f}ms")
 
-    # Interactive mode
+    # 대화형 모드
     print(f"\n{'='*60}")
     print("Interactive mode (type 'quit' to exit)")
     while True:
