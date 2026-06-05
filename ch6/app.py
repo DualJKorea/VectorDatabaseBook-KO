@@ -1,35 +1,37 @@
 """
-Chapter 6: Building a RAG System with SQLite VSS and Ollama
+6장: SQLite VSS와 Ollama로 RAG 시스템 구축
 ============================================================
-A local, private RAG system combining SQLite-VSS for vector search
-and Ollama for local LLM inference.
+벡터 검색을 위한 SQLite-VSS와 로컬 LLM 추론을 위한 Ollama를
+결합한 로컬 비공개 RAG 시스템.
 
-Dependencies: pip install sentence-transformers requests
-Also requires: sqlite-vss binaries (vector0, vss0), Ollama running locally
+의존성: pip install sentence-transformers requests
+추가 요구 사항: sqlite-vss 바이너리(vector0, vss0), 로컬에서 실행 중인 Ollama
 """
 
 import sqlite3
+import ollama
 import requests
 import json
 import time
 import hashlib
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Optional
+import numpy as np
 
 
 # =============================================================================
-# 6.1 - Database Foundation
+# 6.1 - 데이터베이스 기반
 # =============================================================================
 
 def setup_database(db_path='reddit_rag.db'):
-    """Setup SQLite with VSS extension and create tables."""
+    """VSS 확장을 사용하도록 SQLite를 설정하고 테이블 생성"""
     conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = sqlite3.Row # 행을 딕셔너리로 반환
 
     conn.enable_load_extension(True)
     try:
-        conn.load_extension("./vss0")
         conn.load_extension("./vector0")
+        conn.load_extension("./vss0")
         print("VSS extension loaded successfully")
     except Exception as e:
         print(f"Error loading VSS: {e}")
@@ -38,7 +40,7 @@ def setup_database(db_path='reddit_rag.db'):
 
     cursor = conn.cursor()
 
-    # Posts table
+    # posts 테이블 생성
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS posts (
             post_id TEXT PRIMARY KEY,
@@ -51,7 +53,7 @@ def setup_database(db_path='reddit_rag.db'):
         )
     """)
 
-    # Chunks table with vector support
+    # 벡터 지원을 포함한 청크 테이블 생성
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS content_chunks (
             chunk_id INTEGER PRIMARY KEY,
@@ -59,20 +61,19 @@ def setup_database(db_path='reddit_rag.db'):
             post_id TEXT,
             chunk_index INTEGER,
             content TEXT,
-            chunk_vector BLOB,
+            chunk_vector BLOB,  -- VSS용 BLOB으로 저장
             FOREIGN KEY (post_id) REFERENCES posts(post_id)
         )
     """)
 
-    # VSS virtual table for vector search
+    # 벡터 검색을 위한 VSS 가상 테이블 생성
     cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vss USING vss0(
-            chunk_vector(384),
-            chunk_id INTEGER
+            chunk_vector(384)
         )
     """)
 
-    # FTS5 for keyword search
+    # 키워드 검색을 위한 FTS5 생성
     cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
             content,
@@ -86,24 +87,25 @@ def setup_database(db_path='reddit_rag.db'):
 
 
 # =============================================================================
-# 6.2 - Text Processing and Embedding Generation
+# 6.2 - 텍스트 처리 및 임베딩 생성
 # =============================================================================
 
+# 임베딩 모델의 전역 초기화
 embedding_model = None
 
-
 def get_embedding_model():
-    """Get or initialize the embedding model."""
+    """임베딩 모델을 가져오거나 초기화합니다.
+    참고: 첫 호출 시 디스크에서 로드하므로 시간이 더 오래 걸립니다."""
     global embedding_model
     if embedding_model is None:
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         print(f"Loaded embedding model (dimension: "
-              f"{embedding_model.get_sentence_embedding_dimension()})")
+            f"{embedding_model.get_sentence_embedding_dimension()})")
     return embedding_model
 
 
 def chunk_text(text, chunk_size=200, overlap=50):
-    """Simple text chunking by word count."""
+    """단어 수 기준의 단순 텍스트 청킹"""
     words = text.split()
     chunks = []
     for i in range(0, len(words), chunk_size - overlap):
@@ -114,9 +116,10 @@ def chunk_text(text, chunk_size=200, overlap=50):
 
 
 def store_post_with_chunks(conn, post_data):
-    """Store a post and its chunks with embeddings."""
+    """임베딩을 포함하여 게시물과 해당 청크를 저장"""
     cursor = conn.cursor()
 
+    # 게시물 저장
     cursor.execute("""
         INSERT OR REPLACE INTO posts (post_id, title, content, subreddit, author, score)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -125,13 +128,18 @@ def store_post_with_chunks(conn, post_data):
         post_data['subreddit'], post_data['author'], post_data.get('score', 0)
     ))
 
+    # 제목과 본문을 결합하여 청크 생성
     full_text = f"{post_data['title']}\n\n{post_data['content']}"
     chunks = chunk_text(full_text)
-    model = get_embedding_model()
 
+    # 임베딩 모델 가져오기
+    model = get_embedding_model()
+    
+    # 각 청크를 임베딩과 함께 저장
     for idx, chunk_content in enumerate(chunks):
         embedding = model.encode(chunk_content)
-
+        
+        # 청크 저장
         cursor.execute("""
             INSERT INTO content_chunks (post_id, chunk_index, content, chunk_vector)
             VALUES (?, ?, ?, ?)
@@ -139,14 +147,14 @@ def store_post_with_chunks(conn, post_data):
 
         chunk_id = cursor.lastrowid
 
-        # Add to VSS index
-        vector_str = f"vss_create_vector({','.join(map(str, embedding))})"
-        cursor.execute(f"""
-            INSERT INTO chunk_vss (chunk_id, chunk_vector)
-            VALUES (?, {vector_str})
-        """, (chunk_id,))
+        # VSS 인덱스에 추가
+        vector_json = json.dumps(embedding.astype(float).tolist())
+        cursor.execute("""
+            INSERT INTO chunk_vss (rowid, chunk_vector)
+            VALUES (?, ?)
+        """, (chunk_id, vector_json))
 
-        # Add to FTS index
+        # FTS 인덱스에 추가
         cursor.execute("""
             INSERT INTO chunks_fts (rowid, content) VALUES (?, ?)
         """, (chunk_id, chunk_content))
@@ -156,25 +164,26 @@ def store_post_with_chunks(conn, post_data):
 
 
 # =============================================================================
-# 6.3 - Hybrid Search
+# 6.3 - 하이브리드 검색
 # =============================================================================
 
 def hybrid_search(conn, query_text, limit=5, semantic_weight=0.7):
-    """Perform hybrid search combining vector and keyword search."""
+    """벡터 검색과 키워드 검색을 결합한 하이브리드 검색 수행"""
     cursor = conn.cursor()
     model = get_embedding_model()
 
+    # 질의 임베딩 생성
     query_embedding = model.encode(query_text)
-    vector_str = f"vss_create_vector({','.join(map(str, query_embedding))})"
+    query_vector_json = json.dumps(query_embedding.astype(float).tolist())
 
-    # --- Semantic search ---
+    # --- 의미 기반 검색 ---
     try:
-        cursor.execute(f"""
-            SELECT rowid, vss_cosine_distance(chunk_vector, {vector_str}) as distance
+        cursor.execute("""
+            SELECT rowid, distance
             FROM chunk_vss
-            ORDER BY distance ASC
+            WHERE vss_search(chunk_vector, ?)
             LIMIT ?
-        """, (limit * 2,))
+        """, (query_vector_json, limit * 2))
         semantic_rows = cursor.fetchall()
     except Exception as e:
         print(f"Semantic search error: {e}")
@@ -183,28 +192,36 @@ def hybrid_search(conn, query_text, limit=5, semantic_weight=0.7):
     semantic_results = {}
     for row in semantic_rows:
         chunk_id = row[0]
-        similarity = 1 - row[1]  # Convert distance to similarity
+        similarity = 1 - row[1]  # 거리를 유사도로 변환
         semantic_results[chunk_id] = similarity
 
-    # --- Keyword search ---
+    # --- 키워드 검색 ---
     keyword_results = {}
     try:
+        safe_query = ''.join(
+            ch if ch.isalnum() or ch.isspace() else ' '
+            for ch in query_text
+        ).strip()
+
         cursor.execute("""
             SELECT rowid, bm25(chunks_fts) as score
-            FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT ?
-        """, (query_text, limit * 2))
+            FROM chunks_fts
+            WHERE chunks_fts MATCH ?
+            LIMIT ?
+        """, (safe_query, limit * 2))
+
         keyword_rows = cursor.fetchall()
-        # BM25 scores are negative in SQLite; invert
+        # SQLite에서 BM25 점수는 음수이므로 반전
         keyword_results = {row[0]: -row[1] for row in keyword_rows}
     except sqlite3.OperationalError as e:
         print(f"Warning: Keyword search failed: {e}")
 
-    # --- Normalize keyword scores ---
+    # --- 키워드 점수 정규화 ---
     max_key = max(keyword_results.values()) if keyword_results else 1.0
     if max_key > 0:
         keyword_results = {k: v / max_key for k, v in keyword_results.items()}
 
-    # --- Merge: semantic * 0.7 + keyword * 0.3 ---
+    # --- 병합: semantic * 0.7 + keyword * 0.3 ---
     merged = {}
     keyword_weight = 1.0 - semantic_weight
     for cid, score in semantic_results.items():
@@ -214,7 +231,7 @@ def hybrid_search(conn, query_text, limit=5, semantic_weight=0.7):
 
     sorted_ids = sorted(merged.items(), key=lambda x: x[1], reverse=True)[:limit]
 
-    # --- Fetch full chunk data ---
+    # --- 전체 청크 데이터 조회 ---
     results = []
     for chunk_id, score in sorted_ids:
         cursor.execute("""
@@ -233,11 +250,11 @@ def hybrid_search(conn, query_text, limit=5, semantic_weight=0.7):
 
 
 # =============================================================================
-# 6.4 - LLM Integration with Ollama
+# 6.4 - Ollama를 사용한 LLM 통합
 # =============================================================================
 
 def call_ollama(prompt, model="llama3.1:8b", temperature=0.1):
-    """Simple Ollama API call."""
+    """간단한 Ollama API 호출"""
     url = "http://localhost:11434/api/generate"
     payload = {
         "model": model,
@@ -259,12 +276,12 @@ def call_ollama(prompt, model="llama3.1:8b", temperature=0.1):
 
 
 def test_ollama():
-    """Test if Ollama is running."""
+    """Ollama가 실행 중인지 테스트"""
     try:
         response = requests.get("http://localhost:11434/api/tags")
         models = response.json()
         print("Available Ollama models:",
-              [m['name'] for m in models.get('models', [])])
+            [m['name'] for m in models.get('models', [])])
         return True
     except Exception:
         print("Ollama not running. Start with: ollama serve")
@@ -272,11 +289,11 @@ def test_ollama():
 
 
 # =============================================================================
-# 6.5 - RAG Pipeline
+# 6.5 - RAG 파이프라인
 # =============================================================================
 
 def format_context(chunks, conn):
-    """Format retrieved chunks for the LLM."""
+    """LLM을 위한 검색된 청크 포매팅"""
     cursor = conn.cursor()
     formatted_chunks = []
 
@@ -301,9 +318,10 @@ Content:
 
 
 def answer_question(conn, question, num_chunks=5):
-    """Complete RAG pipeline to answer a question."""
+    """질문에 답변하기 위한 완전한 RAG 파이프라인"""
     print(f"\nQuestion: {question}")
 
+    # 1단계: 관련 청크 검색
     start_time = time.time()
     chunks = hybrid_search(conn, question, limit=num_chunks)
     retrieval_time = (time.time() - start_time) * 1000
@@ -313,8 +331,10 @@ def answer_question(conn, question, num_chunks=5):
 
     print(f"Retrieved {len(chunks)} chunks in {retrieval_time:.1f}ms")
 
+    # 2단계: 문맥 형식화
     context = format_context(chunks, conn)
 
+    # 3단계: 프롬프트 생성
     prompt = f"""You are a helpful assistant. Answer the user's question using \
 ONLY the retrieved information provided below.
 
@@ -332,6 +352,7 @@ USER QUESTION:
 ANSWER:
 """
 
+    # 4단계: 답변 생성
     start_time = time.time()
     answer = call_ollama(prompt)
     generation_time = (time.time() - start_time) * 1000
@@ -343,11 +364,11 @@ ANSWER:
 
 
 # =============================================================================
-# 6.6 - Sample Data and Demo
+# 6.6 - 샘플 데이터 및 데모
 # =============================================================================
 
 def load_sample_data(conn):
-    """Load sample Reddit data for testing."""
+    """테스트용 Reddit 샘플 데이터 로드."""
     sample_posts = [
         {
             'post_id': 'post001',
@@ -395,18 +416,21 @@ include Pinecone, Weaviate, and pgvector for PostgreSQL.""",
 
 
 def main():
-    """Main demonstration of the RAG system."""
+    """ RAG 시스템의 주요 시연"""
     print("=== Minimal RAG System with SQLite VSS and Ollama ===\n")
 
+    # 1단계: 데이터베이스 설정
     print("1. Setting up database...")
     conn = setup_database()
 
+    # 2단계: Ollama 확인
     print("\n2. Checking Ollama...")
     if not test_ollama():
         print("Please start Ollama first: ollama serve")
         print("Then pull a model: ollama pull llama3.1:8b")
         return
 
+    # 3단계: 샘플 데이터 로드
     print("\n3. Loading sample data...")
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM posts")
@@ -415,6 +439,7 @@ def main():
     else:
         print("Data already loaded")
 
+    # 4단계: 데모 질문
     print("\n4. Demonstrating RAG system...")
     demo_questions = [
         "What is machine learning and how does it work?",
@@ -427,7 +452,7 @@ def main():
         print(f"\nAnswer: {answer}\n")
         print("=" * 50)
 
-    # Interactive mode
+    # 5단계: 대화형 모드
     print("\n5. Interactive Q&A (type 'quit' to exit)")
     print("-" * 50)
 
@@ -445,9 +470,10 @@ def main():
 
 
 def quick_start():
-    """Quick start for testing individual components."""
+    """개별 구성 요소 테스트를 위한 빠른 시작"""
     conn = setup_database()
 
+    # 검색에 대한 빠른 테스트
     print("Testing hybrid search for 'machine learning'...")
     results = hybrid_search(conn, "machine learning", limit=3)
 
@@ -459,5 +485,8 @@ def quick_start():
 
 
 if __name__ == "__main__":
+    # 메인 데모 실행
     main()
+
+    # 또는 빠른 테스트 실행
     # quick_start()
