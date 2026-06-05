@@ -1,16 +1,16 @@
 """
-Chapter 8: Building a Complete Conversation Search and RAG System
-=================================================================
-A production-oriented RAG system with:
-- PostgreSQL + pgvector for vector storage
-- Conversation history with session management
-- FastAPI server with HTMX-compatible endpoints
-- Ollama for local LLM inference
-- Multi-turn conversation context
+8장: 완전한 대화 검색 및 RAG 시스템 구축
+========================================
+다음을 포함한 프로덕션 지향 RAG 시스템:
+- 벡터 저장을 위한 PostgreSQL + pgvector
+- 세션 관리를 포함한 대화 이력
+- HTMX 호환 엔드포인트를 제공하는 FastAPI 서버
+- 로컬 LLM 추론을 위한 Ollama
+- 멀티턴 대화 컨텍스트
 
-Dependencies: pip install fastapi uvicorn psycopg2-binary sentence-transformers
-              requests numpy jinja2 python-multipart python-dotenv
-Also requires: PostgreSQL with pgvector, Ollama running locally
+의존성: pip install fastapi uvicorn psycopg2-binary sentence-transformers
+            requests numpy jinja2 python-multipart python-dotenv
+추가 요구 사항: pgvector가 포함된 PostgreSQL, 로컬에서 실행 중인 Ollama
 """
 
 import os
@@ -35,7 +35,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Configuration
+# 구성
 # =============================================================================
 
 DB_CONFIG = {
@@ -52,14 +52,14 @@ EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
 
 
 # =============================================================================
-# 8.2 - Database Schema
+# 8.2 - 데이터베이스 스키마
 # =============================================================================
 
 SCHEMA_SQL = """
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
--- Documents table (source material for RAG)
+-- 문서 테이블(RAG의 소스 자료)
 CREATE TABLE IF NOT EXISTS documents (
     id SERIAL PRIMARY KEY,
     doc_id VARCHAR(100) UNIQUE NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Document chunks with embeddings
+-- 임베딩이 포함된 문서 청크
 CREATE TABLE IF NOT EXISTS document_chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
@@ -90,7 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_doc_chunks_doc_id ON document_chunks (document_id
 CREATE INDEX IF NOT EXISTS idx_doc_chunks_text_trgm ON document_chunks
 USING GIN (chunk_text gin_trgm_ops);
 
--- Conversation sessions
+-- 대화 세션
 CREATE TABLE IF NOT EXISTS conversations (
     id SERIAL PRIMARY KEY,
     session_id VARCHAR(64) UNIQUE NOT NULL,
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Conversation messages
+-- 대화 메시지
 CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages (conversation_id, created_at);
 
--- Message embeddings for conversation search
+-- 대화 검색을 위한 메시지 임베딩
 CREATE TABLE IF NOT EXISTS message_embeddings (
     id SERIAL PRIMARY KEY,
     message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS message_embeddings (
 CREATE INDEX IF NOT EXISTS idx_msg_embeddings ON message_embeddings
 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 
--- Search history
+-- 검색 이력
 CREATE TABLE IF NOT EXISTS search_history (
     id SERIAL PRIMARY KEY,
     query_text TEXT NOT NULL,
@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS search_history (
 
 
 def setup_database():
-    """Initialize the database schema."""
+    """데이터베이스 스키마 초기화."""
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
     with conn.cursor() as cur:
@@ -149,7 +149,7 @@ def setup_database():
 
 
 # =============================================================================
-# 8.3 - Connection Pool
+# 8.3 - 연결 풀
 # =============================================================================
 
 _connection_pool = None
@@ -166,7 +166,7 @@ def get_pool() -> pool.ThreadedConnectionPool:
 
 @contextmanager
 def get_db_connection():
-    """Context manager for database connections from pool."""
+    """풀에서 가져온 데이터베이스 연결용 컨텍스트 관리자."""
     p = get_pool()
     conn = p.getconn()
     try:
@@ -180,7 +180,7 @@ def get_db_connection():
 
 
 # =============================================================================
-# 8.4 - Embedding Generator
+# 8.4 - 임베딩 생성기
 # =============================================================================
 
 class EmbeddingGenerator:
@@ -214,11 +214,11 @@ class EmbeddingGenerator:
 
 
 # =============================================================================
-# 8.5 - Document Ingestion
+# 8.5 - 문서 수집
 # =============================================================================
 
 class DocumentIngester:
-    """Ingest documents: chunk, embed, store."""
+    """문서 수집: 청크 분할, 임베딩, 저장."""
 
     def __init__(self, chunk_size: int = 512, chunk_overlap: int = 64):
         self.embedder = EmbeddingGenerator()
@@ -228,7 +228,7 @@ class DocumentIngester:
     def ingest_document(self, doc_id: str, title: str, content: str,
                         source: str = None, doc_type: str = 'text',
                         metadata: dict = None) -> Dict:
-        """Ingest a document: chunk, embed, store in pgvector."""
+        """문서 수집: 청크 분할, 임베딩, pgvector 저장."""
         chunks = self._chunk_text(content)
 
         if not chunks:
@@ -239,7 +239,7 @@ class DocumentIngester:
 
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Upsert document
+                # 문서 업서트
                 cur.execute("""
                     INSERT INTO documents (doc_id, title, content, source, doc_type, metadata)
                     VALUES (%s, %s, %s, %s, %s, %s)
@@ -247,28 +247,28 @@ class DocumentIngester:
                         title = EXCLUDED.title, content = EXCLUDED.content
                     RETURNING id
                 """, (doc_id, title, content, source, doc_type,
-                      json.dumps(metadata or {})))
+                    json.dumps(metadata or {})))
                 document_id = cur.fetchone()['id']
 
-                # Clear old chunks
+                # 기존 청크 삭제
                 cur.execute("DELETE FROM document_chunks WHERE document_id = %s",
                             (document_id,))
 
-                # Insert chunks with embeddings
+                # 임베딩이 포함된 청크 삽입
                 for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
                     cur.execute("""
                         INSERT INTO document_chunks
                         (document_id, chunk_index, chunk_text, embedding,
-                         section_name, token_count)
+                        section_name, token_count)
                         VALUES (%s, %s, %s, %s::vector, %s, %s)
                     """, (document_id, i, chunk['text'],
-                          self.embedder.to_pg_vector(emb),
-                          chunk.get('section'), len(chunk['text'].split())))
+                            self.embedder.to_pg_vector(emb),
+                            chunk.get('section'), len(chunk['text'].split())))
 
         return {'doc_id': doc_id, 'chunks': len(chunks), 'status': 'success'}
 
     def _chunk_text(self, text: str) -> List[Dict]:
-        """Simple word-based chunking with overlap."""
+        """겹침을 포함한 간단한 단어 기반 청크 분할."""
         words = text.split()
         chunks = []
         start = 0
@@ -276,7 +276,7 @@ class DocumentIngester:
         while start < len(words):
             end = min(start + self.chunk_size, len(words))
             chunk_text = ' '.join(words[start:end])
-            if len(chunk_text.split()) >= 20:  # Min chunk size
+            if len(chunk_text.split()) >= 20:  # 최소 청크 크기
                 chunks.append({'text': chunk_text, 'section': None})
             start += self.chunk_size - self.chunk_overlap
 
@@ -284,7 +284,7 @@ class DocumentIngester:
 
 
 # =============================================================================
-# 8.6 - Search Engine
+# 8.6 - 검색 엔진
 # =============================================================================
 
 @dataclass
@@ -299,14 +299,14 @@ class ChunkResult:
 
 
 class SearchEngine:
-    """Hybrid search over document chunks."""
+    """문서 청크에 대한 하이브리드 검색."""
 
     def __init__(self):
         self.embedder = EmbeddingGenerator()
 
     def search(self, query: str, limit: int = 5,
-               semantic_weight: float = 0.7) -> List[ChunkResult]:
-        """Hybrid semantic + keyword search."""
+                semantic_weight: float = 0.7) -> List[ChunkResult]:
+        """하이브리드 의미 기반 + 키워드 검색."""
         query_emb = self.embedder.encode_query(query)
         emb_str = self.embedder.to_pg_vector(query_emb)
 
@@ -314,27 +314,27 @@ class SearchEngine:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
                     WITH semantic AS (
-                        SELECT dc.id as chunk_id,
-                               dc.document_id,
-                               dc.chunk_text,
-                               dc.section_name,
-                               1 - (dc.embedding <=> %(emb)s::vector) as sem_score
+                        SELECT  dc.id as chunk_id,
+                                dc.document_id,
+                                dc.chunk_text,
+                                dc.section_name,
+                                1 - (dc.embedding <=> %(emb)s::vector) as sem_score
                         FROM document_chunks dc
                         ORDER BY dc.embedding <=> %(emb)s::vector ASC
                         LIMIT %(fetch)s
                     ),
                     keyword AS (
                         SELECT dc.id as chunk_id,
-                               dc.document_id,
-                               dc.chunk_text,
-                               dc.section_name,
-                               ts_rank_cd(
-                                   to_tsvector('english', dc.chunk_text),
-                                   plainto_tsquery('english', %(query)s)
-                               ) as kw_score
+                                dc.document_id,
+                                dc.chunk_text,
+                                dc.section_name,
+                                ts_rank_cd(
+                                    to_tsvector('english', dc.chunk_text),
+                                    plainto_tsquery('english', %(query)s)
+                                ) as kw_score
                         FROM document_chunks dc
-                        WHERE to_tsvector('english', dc.chunk_text) @@
-                              plainto_tsquery('english', %(query)s)
+                        WHERE   to_tsvector('english', dc.chunk_text) @@
+                                plainto_tsquery('english', %(query)s)
                         LIMIT %(fetch)s
                     ),
                     combined AS (
@@ -374,7 +374,7 @@ class SearchEngine:
         ) for r in rows]
 
     def search_conversations(self, query: str, limit: int = 5) -> List[Dict]:
-        """Search past conversation messages by semantic similarity."""
+        """의미적 유사도를 기준으로 과거 대화 메시지 검색."""
         query_emb = self.embedder.encode_query(query)
         emb_str = self.embedder.to_pg_vector(query_emb)
 
@@ -382,8 +382,8 @@ class SearchEngine:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
                     SELECT m.id, m.role, m.content, m.created_at,
-                           c.session_id, c.title as conv_title,
-                           1 - (me.embedding <=> %s::vector) as similarity
+                            c.session_id, c.title as conv_title,
+                            1 - (me.embedding <=> %s::vector) as similarity
                     FROM message_embeddings me
                     JOIN messages m ON me.message_id = m.id
                     JOIN conversations c ON m.conversation_id = c.id
@@ -396,17 +396,17 @@ class SearchEngine:
 
 
 # =============================================================================
-# 8.7 - Conversation Manager
+# 8.7 - 대화 관리자
 # =============================================================================
 
 class ConversationManager:
-    """Manage conversation sessions and message history."""
+    """대화 세션 및 메시지 이력 관리."""
 
     def __init__(self):
         self.embedder = EmbeddingGenerator()
 
     def create_session(self, title: str = None) -> str:
-        """Create a new conversation session."""
+        """새 대화 세션 생성."""
         session_id = str(uuid.uuid4())[:16]
 
         with get_db_connection() as conn:
@@ -421,10 +421,10 @@ class ConversationManager:
     def add_message(self, session_id: str, role: str, content: str,
                     sources: List[Dict] = None, retrieval_ms: int = None,
                     generation_ms: int = None, model: str = None) -> int:
-        """Add a message to a conversation and embed it."""
+        """대화에 메시지를 추가하고 임베딩."""
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Get conversation ID
+                # 대화 ID 가져오기
                 cur.execute("""
                     SELECT id FROM conversations WHERE session_id = %s
                 """, (session_id,))
@@ -433,18 +433,18 @@ class ConversationManager:
                     raise ValueError(f"Session {session_id} not found")
                 conv_id = row['id']
 
-                # Insert message
+                # 메시지 삽입
                 cur.execute("""
                     INSERT INTO messages
                     (conversation_id, role, content, sources,
-                     retrieval_time_ms, generation_time_ms, model_used)
+                        retrieval_time_ms, generation_time_ms, model_used)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (conv_id, role, content, json.dumps(sources or []),
-                      retrieval_ms, generation_ms, model))
+                        retrieval_ms, generation_ms, model))
                 msg_id = cur.fetchone()['id']
 
-                # Embed and store message embedding
+                # 메시지를 임베딩하고 메시지 임베딩 저장
                 embedding = self.embedder.encode_query(content)
                 emb_str = self.embedder.to_pg_vector(embedding)
                 cur.execute("""
@@ -452,7 +452,7 @@ class ConversationManager:
                     VALUES (%s, %s::vector)
                 """, (msg_id, emb_str))
 
-                # Update conversation timestamp
+                # 대화 타임스탬프 업데이트
                 cur.execute("""
                     UPDATE conversations SET updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
@@ -461,7 +461,7 @@ class ConversationManager:
         return msg_id
 
     def get_history(self, session_id: str, limit: int = 20) -> List[Dict]:
-        """Get conversation history for a session."""
+        """세션의 대화 이력 가져오기."""
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
@@ -475,12 +475,12 @@ class ConversationManager:
                 return [dict(r) for r in cur.fetchall()]
 
     def list_sessions(self, limit: int = 20) -> List[Dict]:
-        """List recent conversation sessions."""
+        """최근 대화 세션 목록 조회."""
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
                     SELECT c.session_id, c.title, c.created_at, c.updated_at,
-                           COUNT(m.id) as message_count
+                            COUNT(m.id) as message_count
                     FROM conversations c
                     LEFT JOIN messages m ON c.id = m.conversation_id
                     GROUP BY c.id
@@ -491,20 +491,20 @@ class ConversationManager:
 
 
 # =============================================================================
-# 8.8 - Ollama Client
+# 8.8 - Ollama 클라이언트
 # =============================================================================
 
 class OllamaClient:
-    """Client for Ollama LLM inference."""
+    """Ollama LLM 추론용 클라이언트."""
 
     def __init__(self, base_url: str = OLLAMA_BASE_URL,
-                 default_model: str = DEFAULT_MODEL):
+                    default_model: str = DEFAULT_MODEL):
         self.base_url = base_url
         self.default_model = default_model
 
     def generate(self, prompt: str, model: str = None,
-                 temperature: float = 0.1, max_tokens: int = 2048,
-                 system: str = None) -> str:
+                    temperature: float = 0.1, max_tokens: int = 2048,
+                    system: str = None) -> str:
         url = f"{self.base_url}/api/generate"
         payload = {
             "model": model or self.default_model,
@@ -530,8 +530,8 @@ class OllamaClient:
             return f"Error: {str(e)}"
 
     def chat(self, messages: List[Dict], model: str = None,
-             temperature: float = 0.1) -> str:
-        """Multi-turn chat using Ollama's chat endpoint."""
+                temperature: float = 0.1) -> str:
+        """Ollama의 chat 엔드포인트를 사용한 멀티턴 채팅."""
         url = f"{self.base_url}/api/chat"
         payload = {
             "model": model or self.default_model,
@@ -565,11 +565,11 @@ class OllamaClient:
 
 
 # =============================================================================
-# 8.9 - RAG Engine
+# 8.9 - RAG 엔진
 # =============================================================================
 
 class ConversationRAG:
-    """RAG engine with conversation context."""
+    """대화 컨텍스트를 포함한 RAG 엔진."""
 
     def __init__(self):
         self.search = SearchEngine()
@@ -578,30 +578,30 @@ class ConversationRAG:
 
     def ask(self, session_id: str, question: str,
             num_chunks: int = 5, include_history: bool = True) -> Dict:
-        """Process a question with RAG and conversation context."""
+        """RAG와 대화 컨텍스트를 사용한 질문 처리."""
 
-        # 1. Retrieve relevant chunks
+        # 1. 관련 청크 검색
         t0 = time.time()
         chunks = self.search.search(question, limit=num_chunks)
         retrieval_ms = int((time.time() - t0) * 1000)
 
-        # 2. Build context from chunks
+        # 2. 청크로부터 컨텍스트 구성
         context = self._format_chunks(chunks)
 
-        # 3. Get conversation history
+        # 3. 대화 이력 가져오기
         history = []
         if include_history:
             history = self.conversations.get_history(session_id, limit=10)
 
-        # 4. Build prompt
+        # 4. 프롬프트 구성
         prompt = self._build_prompt(question, context, history)
 
-        # 5. Generate answer
+        # 5. 답변 생성
         t1 = time.time()
         answer = self.ollama.generate(prompt)
         generation_ms = int((time.time() - t1) * 1000)
 
-        # 6. Store messages
+        # 6. 메시지 저장
         sources = [{
             'doc_title': c.doc_title,
             'chunk_text': c.chunk_text[:200],
@@ -639,10 +639,10 @@ class ConversationRAG:
         return "\n\n---\n\n".join(sections)
 
     def _build_prompt(self, question: str, context: str,
-                      history: List[Dict]) -> str:
+                        history: List[Dict]) -> str:
         history_text = ""
         if history:
-            recent = history[-6:]  # Last 3 turns
+            recent = history[-6:]  # 최근 3턴
             parts = []
             for msg in recent:
                 role = "User" if msg['role'] == 'user' else "Assistant"
@@ -666,16 +666,16 @@ QUESTION: {question}
 ANSWER:"""
 
     def search_past_conversations(self, query: str, limit: int = 5) -> List[Dict]:
-        """Search across past conversation messages."""
+        """과거 대화 메시지 전체 검색."""
         return self.search.search_conversations(query, limit=limit)
 
 
 # =============================================================================
-# 8.10 - FastAPI Server
+# 8.10 - FastAPI 서버
 # =============================================================================
 
 def create_app():
-    """Create the FastAPI application."""
+    """FastAPI 애플리케이션 생성."""
     from fastapi import FastAPI, Request, Form, HTTPException
     from fastapi.responses import HTMLResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
@@ -685,7 +685,7 @@ def create_app():
     rag = ConversationRAG()
     ingester = DocumentIngester()
 
-    # --- API Endpoints ---
+    # --- API 엔드포인트 ---
 
     @app.get("/api/health")
     def health_check():
@@ -736,7 +736,7 @@ def create_app():
     def search_conversations(q: str, limit: int = 5):
         return rag.search_past_conversations(q, limit)
 
-    # --- HTMX-compatible HTML endpoints ---
+    # --- HTMX 호환 HTML 엔드포인트 ---
 
     @app.post("/htmx/ask", response_class=HTMLResponse)
     async def htmx_ask(request: Request):
@@ -789,7 +789,7 @@ def create_app():
                 .timing { color: #999; }
                 #question-input { width: 70%; padding: 10px; }
                 button { padding: 10px 20px; background: #1976d2; color: white;
-                         border: none; border-radius: 4px; cursor: pointer; }
+                            border: none; border-radius: 4px; cursor: pointer; }
                 button:hover { background: #1565c0; }
             </style>
         </head>
@@ -799,11 +799,11 @@ def create_app():
             <form hx-post="/htmx/ask" hx-target="#messages" hx-swap="beforeend">
                 <input type="hidden" name="session_id" id="session-id" value="">
                 <input type="text" name="question" id="question-input"
-                       placeholder="Ask a question..." autocomplete="off">
+                        placeholder="Ask a question..." autocomplete="off">
                 <button type="submit">Ask</button>
             </form>
             <script>
-                // Auto-create session on first load
+                // 처음 로드할 때 세션 자동 생성
                 fetch('/api/sessions', {method: 'POST'})
                     .then(r => r.json())
                     .then(d => document.getElementById('session-id').value = d.session_id);
@@ -816,11 +816,11 @@ def create_app():
 
 
 # =============================================================================
-# 8.11 - Sample Data
+# 8.11 - 샘플 데이터
 # =============================================================================
 
 def load_sample_data():
-    """Load sample documents for testing."""
+    """테스트용 샘플 문서 로드."""
     ingester = DocumentIngester()
 
     docs = [
@@ -902,7 +902,7 @@ standard for RAG quality assessment.""",
 
 
 # =============================================================================
-# 8.12 - CLI Entry Point
+# 8.12 - CLI 진입점
 # =============================================================================
 
 def main():
@@ -929,7 +929,7 @@ def main():
     print("  python app.py serve [port]  — Start FastAPI server")
     print()
 
-    # Interactive CLI mode
+    # 대화형 CLI 모드
     rag = ConversationRAG()
 
     if not rag.ollama.is_available():
@@ -951,7 +951,7 @@ def main():
             results = rag.search_past_conversations(query)
             for r in results:
                 print(f"  [{r['role']}] {r['content'][:100]}... "
-                      f"(sim: {r['similarity']:.3f})")
+                        f"(sim: {r['similarity']:.3f})")
             continue
 
         result = rag.ask(session_id, q)
