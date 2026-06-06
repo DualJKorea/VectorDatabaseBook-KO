@@ -28,6 +28,6 @@ python app-4.py
 python app-5.py
 ```
 
-## What it does
+## 수행 작업
 
 .
