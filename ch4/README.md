@@ -4,12 +4,14 @@ SQLite-VSS 벡터 검색을 활용해 Reddit 개인 지식 베이스를 구축�
 
 ## 사전 준비 사항
 
-1. **sqlite-vss 바이너리** — Download from https://github.com/asg017/sqlite-vss/releases
-   - Extract `vector0.so` and `vss0.so` (Linux), `.dylib` (macOS), or `.dll` (Windows)
+1. **sqlite-vss 바이너리** — 다음 주소에서 다운로드합니다.
+   - https://github.com/asg017/sqlite-vss/releases
+   - vector0.so와 vss0.so 파일을 추출합니다.
+     - Extract `vector0.so` and `vss0.so` (Linux), `.dylib` (macOS), or `.dll` (Windows)
    - Place them in the same directory as `app.py` (or set `EXTENSION_PATH`)
    - **Note**: sqlite-vss is not officially supported on Windows; use WSL2.
 
-2. **Reddit API credentials** — https://www.reddit.com/prefs/apps
+3. **Reddit API credentials** — https://www.reddit.com/prefs/apps
    - Create a "script" app
    - Note `client_id` and `client_secret`
 
