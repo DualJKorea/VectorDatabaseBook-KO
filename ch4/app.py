@@ -1386,7 +1386,7 @@ def main() -> None:
     DB_PATH = "reddit_knowledge.db"
     EXTENSION_PATH = "."  # vss0 및 vector0이 들어 있는 디렉터리.
     MODEL_NAME = "all-MiniLM-L6-v2"
-    CSV_PATH = "/Users/Shared/ai-demo/vectordb/the-reddit-dataset-dataset-comments.csv"
+    CSV_PATH = "./the-reddit-dataset-dataset-comments.csv"
 
     # CSV의 모든 subreddit을 수집하려면 None으로 설정. 참조한 Kaggle 파일은
     # 일반적으로 r/datasets 전용이므로 ["datasets"]도 안전한 설정.
