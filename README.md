@@ -1,12 +1,11 @@
-# Vector Databases: A Practical Introduction
+# 벡터 데이터베이스: 실용 입문
 
-This is the code repository for the book **"Vector Databases: A Practical Introduction"**.
+이 저장소는 **"벡터 데이터베이스: 실용 입문"** 도서의 코드 저장소입니다..
 
-Chapters 4-8 have full applications. 
+4장부터 8장까지는 완전한 애플리케이션 예제를 포함하고 있습니다. 
 
-Chapter 5 text has code with stubbed out functions - the full code is here.  
-It would have been too big for the book.
- 
-**Publisher**: O'Reilly
+5장의 본문에는 일부 함수가 스텁 형태로 제시되어 있으며, 전체 코드는 이 저장소에서 확인할 수 있습니다. 전체 코드를 책에 모두 싣기에는 분량이 너무 많았기 때문입니다.
 
-**Details**: [https://a.co/d/0i2FWbFi](https://a.co/d/0i2FWbFi)
+**출판사**: O'Reilly
+
+**상세 정보**: [https://a.co/d/0i2FWbFi](https://a.co/d/0i2FWbFi)
