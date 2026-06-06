@@ -48,14 +48,14 @@ python app.py
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET    | /api/health | Health check (Ollama status) |
-| POST   | /api/sessions | Create conversation session |
-| GET    | /api/sessions | List sessions |
-| GET    | /api/sessions/{id}/messages | Get conversation history |
-| POST   | /api/ask?session_id=X&question=Y | Ask a question (RAG) |
-| POST   | /api/documents | Ingest a document |
-| GET    | /api/search?q=X | Search document chunks |
-| GET    | /api/search/conversations?q=X | Search past conversations |
+| GET    | /api/health | 상태 확인(Ollama 상태 포함) |
+| POST   | /api/sessions | 대화 세션 생성 |
+| GET    | /api/sessions | 세션 목록 조회 |
+| GET    | /api/sessions/{id}/messages | 대화 기록 조회 |
+| POST   | /api/ask?session_id=X&question=Y | 질문하기(RAG) |
+| POST   | /api/documents | 문서 수집 |
+| GET    | /api/search?q=X | 문서 청크 검색 |
+| GET    | /api/search/conversations?q=X | 과거 대화 검색 |
 
 ## 아키텍처
 
