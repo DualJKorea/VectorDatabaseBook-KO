@@ -1,10 +1,10 @@
-# Chapter 4: Semantic Search with SQLite3
+# 제4장 SQLite3를 이용한 의미 기반 검색
 
-Reddit personal knowledge base with SQLite-VSS vector search.
+SQLite-VSS 벡터 검색을 활용해 Reddit 개인 지식 베이스를 구축합니다.
 
-## Prerequisites
+## 사전 준비 사항
 
-1. **sqlite-vss binaries** — Download from https://github.com/asg017/sqlite-vss/releases
+1. **sqlite-vss 바이너리** — Download from https://github.com/asg017/sqlite-vss/releases
    - Extract `vector0.so` and `vss0.so` (Linux), `.dylib` (macOS), or `.dll` (Windows)
    - Place them in the same directory as `app.py` (or set `EXTENSION_PATH`)
    - **Note**: sqlite-vss is not officially supported on Windows; use WSL2.
