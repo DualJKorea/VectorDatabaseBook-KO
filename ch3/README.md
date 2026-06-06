@@ -1,24 +1,23 @@
 # 제3장 FAISS를 활용한 유사도 검색
 
-Reddit personal knowledge base with SQLite-VSS vector search.
+벡터 인덱스가 어떻게 작동하는지 이해를 돕기 위한 파이썬 코드 예제입니다.
 
-## Prerequisites
+## 사전 준비 사항
 
-N/A`
+해당 없음`
 
-## Setup
-
+## 설정
 ```bash
 python -m venv ch3_env
 source ch3_env/bin/activate
 pip install -r requirements.txt
 ```
 
-## Configuration
+## 구성
 
-N/A
+해당없음
 
-## Run
+## 실행
 
 ```bash
 # 예제 코드 실행
@@ -31,9 +30,4 @@ python app-5.py
 
 ## What it does
 
-1. Fetches posts from Reddit via PRAW
-2. Cleans/preprocesses text (markdown, URLs, reddit artifacts)
-3. Generates embeddings with all-MiniLM-L6-v2
-4. Stores in SQLite with VSS vector index
-5. Performs semantic search with metadata filtering
-6. Supports cross-subreddit analysis and similar-post discovery
+.
